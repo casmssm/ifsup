@@ -1,0 +1,36 @@
+#!/bin/bash
+
+IFS='
+'
+
+if [[ "$1" == "" ]];then
+echo "Informe a senha para criptografar:"
+read -s SENHA
+	if [[ "$SENHA" == "" ]];then
+	SENHA="ifsupadmin"
+	fi
+else
+SENHA="$1"
+fi
+
+MD5=$(echo -ne $SENHA | md5sum | cut -f1 -d' ')
+count="0"
+FINAL=""
+for letra in $(echo -en $MD5 | fold -w1);do
+	if [[ "$(echo $count%2 | bc)" == 0 ]];then
+	dupla=$letra
+	else
+	dupla="$dupla$letra"
+	HEX_HALF=$((16#$dupla))
+		if [[ "$HEX_HALF" == "0" ]];then
+		CHAR='\0'
+		else
+		CHAR=$(printf \\$(printf '%03o' "$HEX_HALF"))
+		fi
+	STRING_CHARs="$STRING_CHARs$CHAR"
+	fi
+count=$((count+1))
+done
+RESULTADO=$(echo -en "$STRING_CHARs" | base64)
+
+echo "{md5}$RESULTADO"
