@@ -10,7 +10,7 @@ echo "[$AUTH_TIMEOUT]"
 echo -n "auth|$MYIPv4|$MYPORT|$AUTH_TIMEOUT" | ncat -n -w$AUTH_TIMEOUT 10.0.0.11 8888 --send-only
 #mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "INSERT INTO usuario (usuario, senha, quota, idgrupo, admin) VALUES ('SS','bankai','5','1',false)"
 
-#CLIENTIP="200.131.80.3"
+#CLIENTIP="200.100.13.21"
 
 #sed -i -n "/$CLIENTIP/!p" waitlist
 
