@@ -1,0 +1,25 @@
+#!/bin/bash
+
+FULL_PATH="$(realpath $0)"
+FULL_FOLDER="$(dirname $FULL_PATH)"
+
+source "$FULL_FOLDER/../ifsup.conf" #Carrega o arquivo de configuracao
+
+#Limpando o SPOOL
+echo -n "" > $FULL_FOLDER/spool
+
+#Limpando a Wait List
+echo -n "" > $FULL_FOLDER/waitlist
+
+#Eliminando quaisquer trabalhos pendentes
+rm -f /var/spool/tea4cups/tea4cups-ifsup*
+
+while(true)
+do
+JOB=$(head -1 $FULL_FOLDER/spool)
+	if [[ $JOB != "" ]];then
+	sed -i '1 d' $FULL_FOLDER/spool
+	$FULL_FOLDER/ifsup_printer "$JOB" &
+	fi
+sleep 1
+done

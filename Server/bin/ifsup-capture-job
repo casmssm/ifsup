@@ -1,0 +1,28 @@
+#!/bin/bash
+
+FULL_PATH="$(realpath $0)"
+FULL_FOLDER="$(dirname $FULL_PATH)"
+
+echo -e "\r" > $FULL_FOLDER/../info
+
+for atributo in $5;do
+if [[ $atributo == *"host-name"* ]];then
+CLIENT_IP=$(echo $atributo | cut -f2 -d'=')
+	if [[ "$(echo $CLIENT_IP | grep ':')" != "" ]];then
+	CLIENT_IP=$(echo $CLIENT_IP | cut -c5- | rev | cut -c2- | rev)
+	fi 
+fi
+done
+
+sleep 1
+
+ifsupPRINTERjob=$6
+ifsupPRINTERname=$1
+ifsupPRINTERpath=$7
+ifsupPRINTERtitle=$9
+
+#NUMCOPIES=$4 #Número de quota restante (For Debian)
+
+NUMCOPIES=$(pkpgcounter $ifsupPRINTERpath) #Número de quota restante (For CentOS)
+
+echo "newjob|$CLIENT_IP|$ifsupPRINTERjob|$ifsupPRINTERname|$ifsupPRINTERpath|$NUMCOPIES|$ifsupPRINTERtitle" >> $FULL_FOLDER/spool

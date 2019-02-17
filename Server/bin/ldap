@@ -1,0 +1,35 @@
+#!/bin/bash
+
+FULL_PATH="$(realpath $0)"
+FULL_FOLDER="$(dirname $FULL_PATH)"
+
+source "$FULL_FOLDER/../ifsup.conf" #Carrega o arquivo de configuracao
+
+IFS='
+'
+
+LDAP_FIRST_ARG=$1
+LDAPOUTPUT=$(echo $LDAPOUTPUT | sed -e 's/ /\n/g')
+SAIDA=""
+
+#echo "$LDAPOUTPUT"
+#echo "$LDAPFILTER"
+
+pesquisar(){
+#for linha in $(ldapsearch -LLL -D $LDAPUSER -w "$LDAPPASS" -h $LDAPADDR -b $LDAPBASE "($LDAPFILTER=$LDAP_FIRST_ARG)" "$(echo $LDAPOUTPUT | sed -e 's/ /\n/g')" -o ldif-wrap="no")
+for linha in $(ldapsearch -LLL -D $LDAPUSER -w "$LDAPPASS" -h $LDAPADDR -b $LDAPBASE "($LDAPFILTER=$LDAP_FIRST_ARG)" $LDAPOUTPUT -o ldif-wrap="no")
+do
+	if [[ $(echo $linha | grep "userPassword") ]];then
+	SENHA=$(echo -n $(echo -n "$linha" | awk '{print $2}') | base64 -d)
+	SAIDA="$SAIDA\nSENHA=$SENHA\n"
+	echo -e "$SENHA"
+	fi
+	if [[ $(echo $linha | grep "cn") ]];then
+	NOME=$(echo -n $(echo -n "$linha" | cut -f2- -d' '))
+	SAIDA="$SAIDA\nNOME=$NOME\n"
+	echo -e "$NOME"
+	fi
+done
+}
+
+pesquisar

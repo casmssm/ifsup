@@ -1,0 +1,411 @@
+#!/bin/bash
+
+FULL_PATH="$(realpath $0)"
+FULL_FOLDER="$(dirname $FULL_PATH)"
+
+source "$FULL_FOLDER/../ifsup.conf" #Carrega o arquivo de configuracao
+
+CLIENT_IP=$(echo $1 | cut -f2 -d'|')
+ifsupPRINTERjob=$(echo $1 | cut -f3 -d'|')
+ifsupPRINTERname=$(echo $1 | cut -f4 -d'|' | cut -c6-)
+ifsupPRINTERpath=$(echo $1 | cut -f5 -d'|')
+NUMCOPIES=$(echo $1 | cut -f6 -d'|')
+ifsupPRINTERtitle=$(echo $1 | cut -f7 -d'|')
+userSQLid=""
+grupoSQLid=""
+PRINTED_PAGES=0
+REMAINING_PAGES=0
+QUOTA_TYPE=""
+QUOTA=""
+MSG=""
+FULLDATE=$(date +"%d/%m/%Y-%H:%M")
+DIA=$(date +"%d")
+MES=$(date +"%m")
+ANO=$(date +"%Y")
+HORARIO=$(date +"%H:%M:%S")
+printerSQLid=$(mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "SELECT idimpressora FROM impressora WHERE nome='$ifsupPRINTERname'" 2>/dev/null)
+IPversion="4"
+
+################################# DEBUG #################################
+if [[ "$LOG_LEVEL" -lt 1 ]];then					#
+echo "DEBUG|$1|$2|$3|$4|$5|$6|$7|$8|$9" >> $LOG_PATH/$LOG_FILENAME	#
+fi									#
+EXTRA_INFO="$OS_TYPE (0 for Debian based ou 1 for RedHat based)"	#
+echo "OS TYPE = $EXTRA_INFO" >> $LOG_PATH/$LOG_FILENAME			#
+#sleep 5 							        #
+#exit -1 							        #
+#########################################################################
+
+#INICIO DAS FUNÇÕES
+JobPerUserSerialize(){
+while [[ "$(cat $FULL_FOLDER/waitlist | grep "$CLIENT_IP")" != "" ]];do
+sleep 1
+done
+echo "$CLIENT_IP" >> $FULL_FOLDER/waitlist
+}
+
+JobPerUserRelease(){
+sed -i -n "/$CLIENT_IP/!p" $FULL_FOLDER/waitlist
+}
+
+autenticacao(){
+#Função que realiza o processo de autenticação
+#IF IP ADDRESS is v6, else is v4
+if [[ "$IPversion" == "6" ]];then
+	if [[ "$OS_TYPE" == "0" ]];then
+	echo -n "auth|$MYIPv6|$MYPORT|$AUTH_TIMEOUT" | ncat -n -w$AUTH_TIMEOUT $CLIENT_IP $CLIENT_PORT --send-only #For Debian
+	else
+	echo -n "auth|$MYIPv6|$MYPORT|$AUTH_TIMEOUT" | nc -n $CLIENT_IP $CLIENT_PORT --send-only #For CentOS
+	fi
+else
+	if [[ "$OS_TYPE" == "0" ]];then
+	echo -n "auth|$MYIPv4|$MYPORT|$AUTH_TIMEOUT" | ncat -n -w$AUTH_TIMEOUT $CLIENT_IP $CLIENT_PORT --send-only #For Debian
+	else
+	echo -n "auth|$MYIPv4|$MYPORT|$AUTH_TIMEOUT" | nc -n $CLIENT_IP $CLIENT_PORT --send-only #For CentOS
+	fi
+fi
+#//Pega as credenciais e separa
+if [[ "$IPversion" == "6" ]];then
+	if [[ "$OS_TYPE" == "0" ]];then
+	CRED=$(ncat -l -w$AUTH_TIMEOUT $MYIPv6 $MYPORT) #For Debian
+	else
+	CRED=$(nc -l -i$AUTH_TIMEOUT $MYIPv6 $MYPORT) #For CentOS
+	fi
+else
+	if [[ "$OS_TYPE" == "0" ]];then
+	CRED=$(ncat -l -w$AUTH_TIMEOUT $MYIPv4 $MYPORT) #For Debian
+	else
+	CRED=$(nc -l -i$AUTH_TIMEOUT $MYIPv4 $MYPORT) #For CentOS
+	fi
+fi
+receivedUSER=$(echo $CRED | cut -f1 -d'|')
+receivedPASS=$(echo $CRED | cut -f2 -d'|')
+if [[ "$LOG_LEVEL" -lt 1 ]];then
+echo "$FULLDATE||DEBUG||Credentials sended = \"$CRED\"." >> $LOG_PATH/$LOG_FILENAME
+fi
+if [[ $(echo $CRED | cut -f3 -d'|') == "CANCEL" ]];then
+RETURNCODE="555"
+resposta "answer" "$RETURNCODE"
+fi
+if [[ $(echo $CRED | cut -f3 -d'|') == "STOP" ]];then
+RETURNCODE="300"
+resposta "answer" "$RETURNCODE"
+fi
+}
+
+msgclient(){
+#Função que enviar MSGs ao cliente
+if [[ "$OS_TYPE" == "0" ]];then
+echo -n "$1|$2|$ALERT_TIMEOUT|$3" | ncat -n $CLIENT_IP $CLIENT_PORT --send-only # For Debian
+else
+echo -n "$1|$2|$ALERT_TIMEOUT|$3" | nc -n $CLIENT_IP $CLIENT_PORT --send-only # For CentOS
+fi
+}
+
+resposta(){
+#Define as mensagens do cliente e armazena saídas ao arquivo de LOG
+case $2 in
+"-1")msgclient $1 $2 "ERRO $2: A impressora está indisponível neste momento. Aguarde ou tente novamente mais tarde.";
+	echo "$FULLDATE||ERR$2||The printer requested \"$ifsupPRINTERname\" is Offline. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+100)analyzeQUOTA;;
+200) msgclient $1 $2 "Sua impressão foi enviada à impressora.";
+	#echo "$FULLDATE||SUCCESS||User \"$receivedUSER\" completed a job on printer \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	echo "$FULLDATE||SUCCESS||Machine \"$CLIENT_IP\" completed a job on printer \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "INSERT INTO relatorio (dia, mes, ano, horario, data, numero_paginas, idusuario, idimpressora) VALUES ('$DIA','$MES','$ANO','$HORARIO','$(date +"%Y-%m-%d")','$NUMCOPIES','$userSQLid','$printerSQLid')" 2>/dev/null;
+	firewall-cmd -q --remove-port=$MYPORT/tcp;JobPerUserRelease;exit;;
+300) msgclient $1 $2 "ERRO $2: Você cancelou a impressão do arquivo \"$ifsupPRINTERtitle\".";
+	echo "$FULLDATE||ERR$2||Machine \"$CLIENT_IP\" closed Auth Form. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+404) msgclient $1 $2 "ERRO $2: O Usuário não foi encontrado.";
+	echo "$FULLDATE||ERR$2||User of machine \"$CLIENT_IP\" is not found. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+500) msgclient $1 $2 "ERRO $2: Senha Incorreta.";
+	echo "$FULLDATE||ERR$2||Invalid password for user of machine \"$CLIENT_IP\". Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+555) msgclient $1 $2 "ERRO $2: Informe suas credenciais, antes de enviar uma nova impressão.";
+	echo "$FULLDATE||ERR$2||User \"$receivedUSER\" sended a print job before send authentication to the first job. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+666) msgclient $1 $2 "ERRO $2: Usuário ou senha não foram informados.";
+	echo "$FULLDATE||ERR$2||User and/or Password didn\'t entered. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+777) msgclient $1 $2 "ERRO $2: O usuário não possui permissão para impressão de documentos.";
+	echo "$FULLDATE||ERR$2||User received by machine \"$CLIENT_IP\" not have permission to print documents. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+888) msgclient $1 $2 "ERRO $2: A impressora especificada não existe.";
+	echo "$FULLDATE||ERR$2||The specified printer is not found. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+999) msgclient $1 $2 "ERRO $2: Quantidade de impressões EXCEDIDA, você enviou $NUMCOPIES página(s) para imprimir porém possui apenas $REMAINING_PAGES página(s) restante(s).";
+	echo "$FULLDATE||ERR$2||Excceded Quota. User of machine \"$CLIENT_IP\" have $REMAINING_PAGES pages remaining to print but is printing $NUMCOPIES pages." >> $LOG_PATH/$LOG_FILENAME;
+	cancelPRINT;;
+esac
+}
+
+analyzeQUOTA(){
+#Analiza quanto de quota estará permitido ao usuário
+getINFO=$(mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "SELECT usuario.idusuario,usuario.idgrupo,usuario.quota,grupo.quota_tipo,grupo.quota FROM usuario INNER JOIN grupo ON usuario='$receivedUSER'" 2>/dev/null)
+userSQLid=$(echo $getINFO | awk '{print $1}')
+grupoSQLid=$(echo $getINFO | awk '{print $2}')
+QUOTA=$(echo $getINFO | awk '{print $3}')
+QUOTA_TYPE=$(echo $getINFO | awk '{print $4}')
+GROUP_QUOTA=$(echo $getINFO | awk '{print $5}')
+
+#Se a quota do grupo for ilimitada (-1)
+if [[ $GROUP_QUOTA == "-1" ]];then
+echo "|Sending job of client: $CLIENT_IP|" >> $LOG_PATH/$LOG_FILENAME
+JOBSENT=$(lp -d $ifsupPRINTERname $ifsupPRINTERpath | awk '{print $4}')
+	#Enviado a tarefa à impressora
+	while [[ $(lpstat -l | grep $JOBSENT) != "" ]];do
+		sleep 1
+	done
+	if [[ $(lpstat -W completed -o $ifsupPRINTERname | grep $JOBSENT) != "" ]];then
+		RETURNCODE="200"
+		if [[ "$LOG_LEVEL" -lt 2 ]];then
+		#echo "$FULLDATE||SUCCESS||Done for machine $CLIENT_IP using username $receivedUSER." >> $LOG_PATH/$LOG_FILENAME
+		echo "$FULLDATE||SUCCESS||Done for machine $CLIENT_IP." >> $LOG_PATH/$LOG_FILENAME
+		fi
+		rm -f $ifsupPRINTERpath
+		resposta "answer" "$RETURNCODE"
+	fi
+fi
+
+#Se o usuário pertencer não tiver um grupo
+if [[ $grupoSQLid == "NULL" ]];then
+	#Se o usuário não possuir QUOTA própria
+	if [[ $QUOTA == "" ]];then
+		RETURNCODE="777"
+		resposta "answer" "$RETURNCODE"
+	fi
+else
+	QUOTA=$GROUP_QUOTA
+fi
+
+#Se a impressora não estiver cadastrada, cancela a impressao
+if [[ $printerSQLid == "" ]];then
+	RETURNCODE="888"
+	resposta "answer" "$RETURNCODE"
+fi
+
+#Se o tipo de Quota for mensal
+if [[ $QUOTA_TYPE == "mensal" ]];then
+	PRINTED_PAGES=$(mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "SELECT SUM(numero_paginas) FROM relatorio WHERE idusuario='$userSQLid' AND mes='$MES'" 2>/dev/null)
+else
+	PRINTED_PAGES=$(mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "SELECT SUM(numero_paginas) FROM relatorio WHERE idusuario='$userSQLid' AND dia='$DIA'" 2>/dev/null)
+fi
+
+#Páginas restantes é igual a quota menos as paginas impressas
+REMAINING_PAGES=$(($QUOTA-$PRINTED_PAGES))
+
+#Se a quantidade de páginas restantes para imprimir for menor que o número de páginas enviadas à impressora
+if [[ $REMAINING_PAGES -lt $NUMCOPIES ]];then
+	RETURNCODE="999"
+	resposta "answer" "$RETURNCODE"
+fi
+
+#LOGGING
+if [[ "$LOG_LEVEL" -lt 2 ]];then
+	echo "|<Sending job of client: $CLIENT_IP>|" >> $LOG_PATH/$LOG_FILENAME
+fi
+
+#Enviando a tarefa à impressora
+JOBSENT=$(lp -d $ifsupPRINTERname $ifsupPRINTERpath | awk '{print $4}')
+
+#Verificando se a tarefa foi enviada à Impressora
+while [[ $(lpstat -l | grep $JOBSENT) != "" ]];do
+	sleep 1
+done
+
+#Se a tarefa foi completada, avisa o usuário
+if [[ $(lpstat -W completed -o $ifsupPRINTERname | grep $JOBSENT) != "" ]];then
+	RETURNCODE="200"
+	if [[ "$LOG_LEVEL" -lt 2 ]];then
+	echo "$FULLDATE||SUCCESS||Done for machine $CLIENT_IP using username $receivedUSER." >> $LOG_PATH/$LOG_FILENAME
+	fi
+	rm -f $ifsupPRINTERpath
+	resposta "answer" "$RETURNCODE"
+fi
+}
+
+cancelPRINT(){
+#Função que cancela a impressão
+rm -f $ifsupPRINTERpath
+firewall-cmd -q --remove-port=$MYPORT/tcp
+JobPerUserRelease
+exit
+}
+
+selectPORT(){
+#Seleciona a próxima porta disponível começando pela definida inicialmente
+SAIR=0
+while [[ "$SAIR" == 0 ]]
+do
+	#IF IP ADDRESS is v6, else is v4
+	if [[ "$IPversion" == "6" ]];then
+		#IF PORT IS AVAILABLE, ELSE TRY OTHER PORT
+	        if [[ $(nmap -Pn $MYIPv6 -p $MYPORT | grep open) == "" ]];then
+	        SAIR=1
+	        else
+	        MYPORT=$((MYPORT+1))
+	        fi
+	else
+		#IF PORT IS AVAILABLE, ELSE TRY OTHER PORT
+	        if [[ $(nmap -Pn $MYIPv4 -p $MYPORT | grep open) == "" ]];then
+	        SAIR=1
+	        else
+	        MYPORT=$((MYPORT+1))
+	        fi
+	fi
+done
+if [[ "$LOG_LEVEL" -lt 2 ]];then
+	echo "|<Processing $CLIENT_IP using the port: $MYPORT>|" >> $LOG_PATH/$LOG_FILENAME
+fi
+firewall-cmd -q --add-port=$MYPORT/tcp
+}
+
+consultLDAP(){
+if [[ $RETURNCODE != "100" ]];then
+myINFO=$($FULL_FOLDER/ldap $receivedUSER)
+myPASS=$(echo "$myINFO" | awk '{print $2}' RS='\n\n' FS='\n')
+myREALNAME=$(echo "$myINFO" | awk '{print $1}' RS='\n\n' FS='\n')
+        if [[ "$LOG_LEVEL" -lt 2 ]];then
+                echo "|<INFO getted: $myINFO>|" >> $LOG_PATH/$LOG_FILENAME
+                echo "|<myPASS getted: $myPASS>|" >> $LOG_PATH/$LOG_FILENAME
+                echo "|<myREALNAME getted: $myREALNAME>|" >> $LOG_PATH/$LOG_FILENAME
+        fi
+	if [[ "$LOG_LEVEL" -lt 2 ]];then
+		echo "|<Client $receivedUSER from $CLIENT_IP trying auth via LDAP...>|" >> $LOG_PATH/$LOG_FILENAME
+	fi
+	if [[ $myPASS != "" ]];then
+		if [[ $myPASS == "$receivedPASS" ]];then
+		RETURNCODE="100"
+		else
+		RETURNCODE="500"
+		fi
+	else
+	RETURNCODE="404"
+	fi
+fi
+}
+
+consultLDAPandCREATE(){
+if [[ $RETURNCODE != "100" ]];then
+myINFO=$($FULL_FOLDER/ldap $receivedUSER)
+myPASS=$(echo "$myINFO" | awk '{print $2}' RS='\n\n' FS='\n')
+myREALNAME=$(echo "$myINFO" | awk '{print $1}' RS='\n\n' FS='\n')
+	if [[ "$LOG_LEVEL" -lt 2 ]];then
+		echo "|<INFO getted: $myINFO>|" >> $LOG_PATH/$LOG_FILENAME
+		echo "|<myPASS getted: $myPASS>|" >> $LOG_PATH/$LOG_FILENAME
+		echo "|<myREALNAME getted: $myREALNAME>|" >> $LOG_PATH/$LOG_FILENAME
+	fi
+	if [[ "$LOG_LEVEL" -lt 2 ]];then
+		echo "|<Client $receivedUSER from $CLIENT_IP trying auth via LDAP to Create USER using pass getted from LDAP ($myPASS)...>|" >> $LOG_PATH/$LOG_FILENAME
+	fi
+	if [[ $myPASS != "" ]];then
+		if [[ $myPASS == "$receivedPASS" ]];then
+		RETURNCODE="100"
+			SQLifExist=$(mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "SELECT * FROM usuario WHERE usuario='$receivedUSER'" 2>/dev/null)
+			if [[ $SQLifExist == "" ]];then
+				if [[ "$LOG_LEVEL" -lt 2 ]];then
+					echo "|<Creating entry in MySQL to $receivedUSER with encrypted pass \"$receivedPASS\" that equals pass from LDAP (\"$myPASS\") from $CLIENT_IP.>|" >> $LOG_PATH/$LOG_FILENAME
+				fi
+			mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "INSERT INTO usuario (nome, usuario, senha, quota, idgrupo, admin) VALUES ('$myREALNAME','$receivedUSER','$receivedPASS','5','1',false)"
+			else
+				if [[ "$LOG_LEVEL" -lt 2 ]];then
+					echo "|<User \"$receivedUSER\"already exist in Database MySQL.>|" >> $LOG_PATH/$LOG_FILENAME
+				fi
+			fi
+		else
+		RETURNCODE="500"
+		fi
+	else
+	RETURNCODE="404"
+	fi
+fi
+}
+
+consultMYSQL(){
+echo "(8)" >> $LOG_PATH/$LOG_FILENAME
+if [[ $RETURNCODE != "100" ]];then
+	if [[ "$LOG_LEVEL" -lt 2 ]];then
+		echo "|<Client $receivedUSER from $CLIENT_IP trying auth via MySQL...>|" >> $LOG_PATH/$LOG_FILENAME
+	fi
+myPASS=$(mysql -B -N -u "'$ifsupSQLUSER'" -p"$ifsupSQLPASS" -D "$ifsupSQLBASE" -h $ifsupSQLADDR -e "SELECT senha FROM usuario WHERE usuario='$receivedUSER'" 2>/dev/null)
+	if [[ $myPASS != "" ]];then
+		if [[ $myPASS == "$receivedPASS" ]];then
+		RETURNCODE="100"
+		else
+		RETURNCODE="500"
+		fi
+	else
+	RETURNCODE="404"
+	fi
+fi
+}
+
+consultBLANK(){
+if [[ $CRED == "" ]];then
+RETURNCODE="666"
+resposta "answer" "$RETURNCODE"
+fi
+}
+
+consulta(){
+case $1 in
+1) consultMYSQL;;
+2) consultLDAP;;
+3) consultLDAP;consultMYSQL;;
+4) consultMYSQL;consultLDAP;;
+5) consultMYSQL;consultLDAPandCREATE;;
+*) echo "$( date +"%d/%m/%Y-%H:%M")||ERR2000||The AUTHMETHOD "$AUTH_METHOD" is invalid. Printer job has been canceled on \"$ifsupPRINTERname\"." >> $LOG_PATH/$LOG_FILENAME;;
+esac
+resposta "answer" "$RETURNCODE"
+}
+
+clientISlive(){
+#Verifica se o cliente está com o software de impressão aberto.
+#IF IP ADDRESS is v6, else is v4
+
+if [[ "$IPversion" == "6" ]];then
+	#IF CLIENT IS ALIVE
+	if [[ $(nmap -6 -Pn $CLIENT_IP -p $CLIENT_PORT | grep open) == "" ]];then
+	echo "$DATEFULL||CRITICAL||The IP Address v6 \"$CLIENT_IP\" try print but the client is closed or the Firewall is blocking this server to connect on port \"$CLIENT_PORT\" of client." >> $LOG_PATH/$LOG_FILENAME
+	cancelPRINT
+	fi
+else
+	#IF CLIENT IS ALIVE
+	if [[ $(nmap -Pn $CLIENT_IP -p $CLIENT_PORT | grep open) == "" ]];then
+	echo "$DATEFULL||CRITICAL||The IP Address \"$CLIENT_IP\" try print but the client is closed or the Firewall is blocking this server to connect on port \"$CLIENT_PORT\" of client." >> $LOG_PATH/$LOG_FILENAME
+	cancelPRINT
+	fi
+fi
+}
+
+printISlive(){
+#Verifica se a impressora está offline
+if [[ $(nmap $ifsupPRINTERname.$DOMAIN -p 9100 | grep open) == "" ]];then
+RETURNCODE="-1"
+resposta "answer" "$RETURNCODE"
+fi
+}
+
+IPAddrCheckVersion(){
+if [[ "$(echo $CLIENT_IP |  tr -d -C ':' | wc -c)" -gt 1 ]];then
+IPversion="6"
+fi
+}
+
+#FIM DAS FUNÇÕES
+
+
+
+#INICIO DA MAIN
+JobPerUserSerialize
+IPAddrCheckVersion
+clientISlive
+printISlive
+selectPORT
+autenticacao
+consultBLANK
+consulta $AUTH_METHOD
+#FIM DA MAIN
+

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+FULL_PATH="$(realpath $0)"
+FULL_FOLDER="$(dirname $FULL_PATH)"
+
+ssNAME="daemon-ifsup.run"
+pkill daemon-ifsup
+echo "Stoping..."
+
+if [[ $(ps aux | grep $ssNAME | grep "S" | grep -v "grep" | wc -l) -lt 1 ]];then
+	echo "Done.$(sleep 1)"
+else
+	echo "An unknow error occured.$(sleep 5)"
+fi
+

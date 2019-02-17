@@ -1,0 +1,31 @@
+#!/bin/bash
+
+FULL_PATH="$(realpath $0)"
+FULL_FOLDER="$(dirname $FULL_PATH)"
+
+ssNAME="daemon-ifsup.run"
+pkill daemon-ifsup
+
+if [[ "$1" == "-now" ]];then
+	echo "Starting..."
+else
+	echo "Running as System Init-Daemon mode"
+	echo "To run as user-level please use parameter \"-now\""
+	echo "Waiting 30 seconds..."
+	sleep 30
+fi
+
+$FULL_FOLDER/$ssNAME &
+
+#if [[ $(dirname $0) != "." ]];then
+#	$(dirname $0)/$ssNAME &
+#else
+#	./$ssNAME &
+#fi
+
+if [[ $(ps aux | grep $ssNAME | grep "S" | grep -v "grep" | wc -l) -gt 0 ]];then
+	echo "Done.$(sleep 1)"
+else
+	echo "An unknow error occured.$(sleep 5)"
+fi
+
