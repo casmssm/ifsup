@@ -7,7 +7,7 @@ LOG_PATH="$FULL_FOLDER/logs"
 #Creating Table
 echo -e "\nCreating database 'ifsup' on MySQL..."
 mysql -e "CREATE DATABASE ifsup;" 2>/dev/null
-mysql ifsup < dependencies/ifsup.sql 2>/dev/null
+mysql ifsup < $FULL_FOLDER/dependencies/ifsup.sql 2>/dev/null
 echo -e "Done."
 echo -e "Creating Users and privileges on database..."
 SENHA=$(cat $FULL_FOLDER/ifsup.conf | grep 'ifsupSQLPASS=' | cut -f2 -d'=' | cut -f2 -d"'")
