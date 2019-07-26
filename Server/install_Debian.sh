@@ -25,6 +25,7 @@ echo -e "Done.\n"
 
 
 echo -e "Instalando os pacotes necessários..."
+#apt install pkpgcounter cups cups-tea4cups cups-ipp-utils cups-filters ghostscript hplip libcupsfilters1 firewalld -y
 apt install pkpgcounter cups cups-tea4cups cups-ipp-utils cups-filters ghostscript hplip libcupsfilters1 firewalld -y
 sleep 2
 echo -e "Done\n"
