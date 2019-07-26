@@ -19,7 +19,8 @@ echo -e "Done."
 
 #Fix CONFIG TABLE on MySQL
 echo -e "Setting DEFAULT SQL configurations..."
-mysql -D "ifsup" -e "INSERT INTO configuracao (idconfiguracao,LOG_PATH,ROOT_PATH,SPOOL_PATH) VALUES(1,'$LOG_PATH','$FULL_FOLDER','$FULL_FOLDER/bin/spool') ON DUPLICATE KEY UPDATE  LOG_PATH='$LOG_PATH', ROOT_PATH='$FULL_FOLDER', SPOOL_PATH='$FULL_FOLDER/bin/spool'"
+#mysql -D "ifsup" -e "INSERT INTO configuracao (idconfiguracao,LOG_PATH,ROOT_PATH,SPOOL_PATH) VALUES(1,'$LOG_PATH','$FULL_FOLDER','$FULL_FOLDER/bin/spool') ON DUPLICATE KEY UPDATE  LOG_PATH='$LOG_PATH', ROOT_PATH='$FULL_FOLDER', SPOOL_PATH='$FULL_FOLDER/bin/spool'"
+mysql -D "ifsup" -e "UPDATE configuracao SET LOG_PATH='$LOG_PATH',ROOT_PATH='$FULL_FOLDER',SPOOL_PATH='$FULL_FOLDER/bin/spool' WHERE idconfiguracao = 1"
 sleep 2
 echo -e "Done.\n"
 
