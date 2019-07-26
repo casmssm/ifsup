@@ -12,12 +12,9 @@ mysql ifsup < $FULL_FOLDER/dependencies/ifsup.sql
 echo -e "Done."
 echo -e "Creating Users and privileges on database..."
 SENHA=$(cat $FULL_FOLDER/ifsup.conf | grep 'ifsupSQLPASS=' | cut -f2 -d'=' | cut -f2 -d"'")
-#mysql -e "DROP USER 'ifsupadmin'@'localhost';" 2>/dev/null
-mysql -e "DROP USER 'ifsupadmin'@'localhost';"
-#mysql -e "CREATE USER 'ifsupadmin'@'localhost' IDENTIFIED BY '$SENHA';" 2>/dev/null
-mysql -e "CREATE USER 'ifsupadmin'@'localhost' IDENTIFIED BY '$SENHA';"
-#mysql -e "GRANT ALL PRIVILEGES ON ifsup.* TO 'ifsupadmin'@'localhost';" 2>/dev/null
-mysql -e "GRANT ALL PRIVILEGES ON ifsup.* TO 'ifsupadmin'@'localhost';"
+mysql -e "DROP USER 'ifsupadmin'@'localhost';" 2>/dev/null
+mysql -e "CREATE USER 'ifsupadmin'@'localhost' IDENTIFIED BY '$SENHA';" 2>/dev/null
+mysql -e "GRANT ALL PRIVILEGES ON ifsup.* TO 'ifsupadmin'@'localhost';" 2>/dev/null
 sleep 2
 echo -e "Done."
 
@@ -39,7 +36,7 @@ echo -e "Aplicando regras de firewall"
 firewall-cmd --permanent --add-port=22/tcp 2>/dev/null
 firewall-cmd --permanent --add-port=80/tcp 2>/dev/null
 firewall-cmd --permanent --add-port=631/tcp 2>/dev/null
-firewall-cmd --reload
+firewall-cmd --reload 2>/dev/null
 sleep 2
 echo -e "Done\n"
 
@@ -88,6 +85,6 @@ echo -e "Done\n"
 
 echo -e "Reloading services..."
 service cups restart
-service apache2 restart
+service apache2 restart 2>/dev/null
 sleep 2
 echo -e "Done\n"
